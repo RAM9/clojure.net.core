@@ -5,17 +5,17 @@
   (:use [lamina.core]
         [clojure.tools.logging :only (debug info warn)]))
 
-(defn ninfo [host port]
+(defn node-info [host port]
    {:host host
    :port port})
 
-(defn snode [ninfo]
+(defn server-node [ninfo]
   {:ninfo ninfo
    :conn nil
    :rnodes {}})
 
-(defn snode! [ninfo]
-  (agent (snode ninfo)))
+(defn server-node! [ninfo]
+  (agent (server-node ninfo)))
 
 (defn remote-node [ninfo conn]
   {:ninfo ninfo
@@ -61,11 +61,21 @@
 
 (defn start [ninfo]
   (info "starting server" ninfo)
-  (let [server! (snode! ninfo)
+  (let [server! (server-node! ninfo)
         conn (tcp/start-tcp-server (server-handler server!) {:port (:port ninfo)
                                                              :frame cmd/frame})]
     (send-off server! assoc :conn conn)
     server!))
+
+(defn sjoin3 [server conn msg]
+  (let [[joined? server2] (add-node server conn msg)]
+    (if joined?
+      (do
+        (info "accepted connection" (:ninfo msg)))
+      (do
+        (enqueue conn {:type :error})
+        (close conn)))
+    server2))
 
 (defn sjoin2 [server! conn]
   (enqueue conn {:type :join
@@ -77,7 +87,8 @@
       (debug "response" msg)
       (if (= (:type msg) :ok)
         (do
-          (info "joined server" (:ninfo msg)))
+          (info "joined server" (:ninfo msg))
+          (send-off server! sjoin3 conn msg))
         (do
           (info "failed to join server")
           (close conn))))))
@@ -92,11 +103,11 @@
       #(sjoin2 server! %))))
 
 (defn run-test []
-  (def serv1 (start (ninfo "localhost" 6661)))
-  (def serv2 (start (ninfo "localhost" 6662)))
-  ;(def serv3 (start (ninfo "node3" "localhost" 6663)))
-  ;(def serv4 (start (ninfo "node4" "localhost" 6664)))
-  ;(def serv5 (start (ninfo "node5" "localhost" 6665)))
+  (def serv1 (start (node-info "localhost" 6661)))
+  (def serv2 (start (node-info "localhost" 6662)))
+  ;(def serv3 (start (node-info "node3" "localhost" 6663)))
+  ;(def serv4 (start (node-info "node4" "localhost" 6664)))
+  ;(def serv5 (start (node-info "node5" "localhost" 6665)))
 
   (sjoin serv1 "localhost" 6662)
   (sjoin serv1 "localhost" 6662))
