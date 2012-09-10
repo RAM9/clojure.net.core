@@ -12,12 +12,35 @@
 (defn snode [ninfo]
   {:ninfo ninfo
    :conn nil
-   :rnodes #{}})
+   :rnodes {}})
 
 (defn snode! [ninfo]
   (agent (snode ninfo)))
 
-(defn add-node [{:keys [rnodes] :as server} conn {:keys [ninfo] :as msg}])
+(defn remote-node [ninfo conn]
+  {:ninfo ninfo
+   :conn conn})
+
+(defn remote-node! [ninfo conn]
+  (agent (remote-node ninfo conn)))
+
+(defn nkey
+  ([ninfo] (nkey (:host ninfo) (:port ninfo)))
+  ([host port] [host port]))
+
+(defn add-node [{:keys [rnodes] :as server} conn {:keys [ninfo] :as msg}]
+  (if (rnodes (nkey ninfo))
+    [false server]
+    (let [rnode! (remote-node! ninfo conn)]
+      [true (assoc server :rnodes (assoc rnodes (nkey ninfo) rnode!))])))
+
+(defn handle-join2 [server conn msg]
+  (let [[joined? server2] (add-node server conn msg)]
+    (debug joined? server2)
+    (if joined?
+      (enqueue conn {:type :ok})
+      (enqueue-and-close conn {:type :error}))
+    server2))
 
 (defn handle-join [server! conn]
   (run-pipeline
@@ -26,8 +49,7 @@
     (fn [msg]
       (debug "receive" msg)
       (if (= (:type msg) :join)
-        (do)
-        ;(send-off server! add-node conn msg)
+        (send-off server! handle-join2 conn msg)
         (throw (Exception. "first message was not join!"))))))
 
 (defn server-handler [server!]
@@ -46,7 +68,11 @@
 
 (defn sjoin2 [server! conn]
   (enqueue conn {:type :join
-                 :ninfo (:ninfo @server!)}))
+                 :ninfo (:ninfo @server!)})
+  (run-pipeline
+    conn
+    read-channel
+    #(debug "GOT BACK" %)))
 
 (defn sjoin [server! host port]
   (let [result-conn (tcp/tcp-client
@@ -64,6 +90,7 @@
   ;(def serv4 (start (ninfo "node4" "localhost" 6664)))
   ;(def serv5 (start (ninfo "node5" "localhost" 6665)))
 
+  (sjoin serv1 "localhost" 6662)
   (sjoin serv1 "localhost" 6662))
 
 ;(cjoin! (:server! serv2) "localhost" 6661)
