@@ -19,8 +19,8 @@
 (defcodec join {:type :join
                 :ninfo ninfo})
 
-(defcodec ok {:type :ok})
-              ;:ninfo ninfo
+(defcodec ok {:type :ok
+              :ninfo ninfo})
               ;:remote-nodes ninfos})
 
 (defcodec ping {:type :ping})

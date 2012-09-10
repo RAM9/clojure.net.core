@@ -38,7 +38,8 @@
   (let [[joined? server2] (add-node server conn msg)]
     (debug joined? server2)
     (if joined?
-      (enqueue conn {:type :ok})
+      (enqueue conn {:type :ok
+                     :ninfo (:ninfo server)})
       (enqueue-and-close conn {:type :error}))
     server2))
 
@@ -72,7 +73,14 @@
   (run-pipeline
     conn
     read-channel
-    #(debug "GOT BACK" %)))
+    (fn [msg]
+      (debug "response" msg)
+      (if (= (:type msg) :ok)
+        (do
+          (info "joined server" (:ninfo msg)))
+        (do
+          (info "failed to join server")
+          (close conn))))))
 
 (defn sjoin [server! host port]
   (let [result-conn (tcp/tcp-client
