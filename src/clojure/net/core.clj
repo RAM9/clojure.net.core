@@ -65,7 +65,7 @@
       (fn [conn] (handle-join server! conn)))))
 
 (defn start [ninfo]
-  ;(info "starting server" ninfo)
+  (info "starting server" ninfo)
   (let [server! (server-node! ninfo)
         conn (tcp/start-tcp-server (server-handler server!) {:port (:port ninfo)
                                                              :frame cmd/frame})]
@@ -83,7 +83,6 @@
   (let [[joined? server2] (add-node server conn msg)]
     (if joined?
       (do
-        ;(info "accepted connection" (:ninfo msg))
         (sjoin-all server! (:rninfos msg)))
       (do
         (enqueue conn {:type :error})
@@ -99,10 +98,8 @@
     (fn [msg]
       (if (= (:type msg) :ok)
         (do
-          ;(info "joined server" (:ninfo msg))
           (send-off server! sjoin3 server! conn msg))
         (do
-          ;(info "failed to join server")
           (close conn))))))
 
 (defn sjoin [server! host port]
