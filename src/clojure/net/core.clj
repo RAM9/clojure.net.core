@@ -5,6 +5,8 @@
   (:use [lamina.core]
         [clojure.tools.logging :only (debug info warn)]))
 
+(def monitor-pool (at/mk-pool))
+
 (defn node-info [host port]
    {:host host
    :port port})
@@ -32,12 +34,22 @@
 (defn rninfos [{:keys [rnodes]}]
   (into [] (map (fn [[_ rnode!]] (:ninfo @rnode!)) rnodes)))
 
+(defn process [rnode! msg]
+  (debug "received" msg))
+
+(defn rnode-pipeline [rnode!]
+  (pipeline
+    read-channel
+    #(process rnode! %)
+    (fn [_] (restart))))
+
 (defn add-node [{rnodes :rnodes sninfo :ninfo :as server} conn {:keys [ninfo] :as msg}]
   (if (rnodes (nkey ninfo))
     (do (info (nkey ninfo) "failed to join" (nkey sninfo))
       [false server])
     (let [rnode! (remote-node! ninfo conn)]
       (info (nkey ninfo) "joined" (nkey sninfo))
+      ((rnode-pipeline rnode!) conn)
       [true (assoc server :rnodes (assoc rnodes (nkey ninfo) rnode!))])))
 
 (defn handle-join2 [server conn msg]
@@ -64,12 +76,25 @@
       result-conn
       (fn [conn] (handle-join server! conn)))))
 
+(defn monitor [server!]
+  (let [rnodes (:rnodes @server!)]
+    (doseq [[_ rnode!] rnodes]
+      (enqueue (:conn @rnode!) {:type :ping}))))
+
+(defn start-monitor [server!]
+  (send-off
+    server!
+    (fn [server]
+      (let [monitor-task (at/every 2000 #(monitor server!) monitor-pool)]
+        (with-meta server {:monitor-task monitor-task})))))
+
 (defn start [ninfo]
   (info "starting server" ninfo)
   (let [server! (server-node! ninfo)
         conn (tcp/start-tcp-server (server-handler server!) {:port (:port ninfo)
                                                              :frame cmd/frame})]
     (send-off server! assoc :conn conn)
+    (start-monitor server!)
     server!))
 
 (declare sjoin)
