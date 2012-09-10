@@ -20,8 +20,8 @@
                 :ninfo ninfo})
 
 (defcodec ok {:type :ok
-              :ninfo ninfo})
-              ;:remote-nodes ninfos})
+              :ninfo ninfo
+              :rninfos ninfos})
 
 (defcodec ping {:type :ping})
 

@@ -12,7 +12,8 @@
 (defn server-node [ninfo]
   {:ninfo ninfo
    :conn nil
-   :rnodes {}})
+   :rnodes {}
+   :oconns #{}})
 
 (defn server-node! [ninfo]
   (agent (server-node ninfo)))
@@ -28,18 +29,23 @@
   ([ninfo] (nkey (:host ninfo) (:port ninfo)))
   ([host port] [host port]))
 
-(defn add-node [{:keys [rnodes] :as server} conn {:keys [ninfo] :as msg}]
+(defn rninfos [{:keys [rnodes]}]
+  (into [] (map (fn [[_ rnode!]] (:ninfo @rnode!)) rnodes)))
+
+(defn add-node [{rnodes :rnodes sninfo :ninfo :as server} conn {:keys [ninfo] :as msg}]
   (if (rnodes (nkey ninfo))
-    [false server]
+    (do (info (nkey ninfo) "failed to join" (nkey sninfo))
+      [false server])
     (let [rnode! (remote-node! ninfo conn)]
+      (info (nkey ninfo) "joined" (nkey sninfo))
       [true (assoc server :rnodes (assoc rnodes (nkey ninfo) rnode!))])))
 
 (defn handle-join2 [server conn msg]
   (let [[joined? server2] (add-node server conn msg)]
-    (debug joined? server2)
     (if joined?
       (enqueue conn {:type :ok
-                     :ninfo (:ninfo server)})
+                     :ninfo (:ninfo server)
+                     :rninfos (rninfos server)})
       (enqueue-and-close conn {:type :error}))
     server2))
 
@@ -48,7 +54,6 @@
     conn
     read-channel
     (fn [msg]
-      (debug "receive" msg)
       (if (= (:type msg) :join)
         (send-off server! handle-join2 conn msg)
         (throw (Exception. "first message was not join!"))))))
@@ -60,18 +65,26 @@
       (fn [conn] (handle-join server! conn)))))
 
 (defn start [ninfo]
-  (info "starting server" ninfo)
+  ;(info "starting server" ninfo)
   (let [server! (server-node! ninfo)
         conn (tcp/start-tcp-server (server-handler server!) {:port (:port ninfo)
                                                              :frame cmd/frame})]
     (send-off server! assoc :conn conn)
     server!))
 
-(defn sjoin3 [server conn msg]
+(declare sjoin)
+
+(defn sjoin-all [server! rninfos]
+  (doseq
+    [ninfo rninfos]
+    (sjoin server! (:host ninfo) (:port ninfo))))
+
+(defn sjoin3 [server server! conn msg]
   (let [[joined? server2] (add-node server conn msg)]
     (if joined?
       (do
-        (info "accepted connection" (:ninfo msg)))
+        ;(info "accepted connection" (:ninfo msg))
+        (sjoin-all server! (:rninfos msg)))
       (do
         (enqueue conn {:type :error})
         (close conn)))
@@ -84,13 +97,12 @@
     conn
     read-channel
     (fn [msg]
-      (debug "response" msg)
       (if (= (:type msg) :ok)
         (do
-          (info "joined server" (:ninfo msg))
-          (send-off server! sjoin3 conn msg))
+          ;(info "joined server" (:ninfo msg))
+          (send-off server! sjoin3 server! conn msg))
         (do
-          (info "failed to join server")
+          ;(info "failed to join server")
           (close conn))))))
 
 (defn sjoin [server! host port]
@@ -105,12 +117,12 @@
 (defn run-test []
   (def serv1 (start (node-info "localhost" 6661)))
   (def serv2 (start (node-info "localhost" 6662)))
-  ;(def serv3 (start (node-info "node3" "localhost" 6663)))
+  (def serv3 (start (node-info "localhost" 6663)))
   ;(def serv4 (start (node-info "node4" "localhost" 6664)))
   ;(def serv5 (start (node-info "node5" "localhost" 6665)))
 
-  (sjoin serv1 "localhost" 6662)
-  (sjoin serv1 "localhost" 6662))
+  (sjoin serv2 "localhost" 6661)
+  (sjoin serv3 "localhost" 6661))
 
 ;(cjoin! (:server! serv2) "localhost" 6661)
 ;(cjoin! (:server! serv3) "localhost" 6661)
