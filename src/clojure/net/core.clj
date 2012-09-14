@@ -37,14 +37,19 @@
 
 (defn handshake-complete [{connections :connections :as kernel} node]
   (if (connections node)
-    [false kernel]
-    [true (assoc
-            kernel
-            :connections
-            (assoc
-              connections
-              node
-              (new-connection! node)))]))
+    (do
+      (info (:node kernel) "failed to join" node)
+      [false kernel])
+    (do
+      (info (:node kernel) "joined" node)
+      [true
+       (assoc
+         kernel
+         :connections
+         (assoc
+           connections
+           node
+           (new-connection! node)))])))
 
 (defn send-handshake [conn node]
   (enqueue conn {:type :handshake
