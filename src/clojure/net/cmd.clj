@@ -1,37 +1,52 @@
 (ns clojure.net.cmd
   (:use [gloss core io]))
 
-(defcodec id (finite-frame :int16
-                           (string :utf-8)))
-(defcodec host (finite-frame :int16
-                             (string :utf-8)))
+(defcodec
+  host
+  (finite-frame
+    :int16
+    (string :utf-8)))
+
 (defcodec port :int32)
 
-(defcodec ninfo {:host host
-                 :port port})
+(defcodec
+  node
+   {:host host
+   :port port})
 
-(defcodec ninfos (finite-frame
-                   :int32
-                   (repeated ninfo)))
+(defcodec
+  handshake
+  {:type :handshake
+   :node node})
 
-(defcodec ctype (enum :byte :join :ok :ping :error))
+;(defcodec ninfo {:host host
+                 ;:port port})
 
-(defcodec join {:type :join
-                :ninfo ninfo})
+;(defcodec ninfos (finite-frame
+                   ;:int32
+                   ;(repeated ninfo)))
 
-(defcodec ok {:type :ok
-              :ninfo ninfo
-              :rninfos ninfos})
+;(defcodec ctype (enum :byte :join :ok :ping :error))
 
-(defcodec ping {:type :ping})
+;(defcodec join {:type :join
+                ;:ninfo ninfo})
 
-(defcodec error {:type :error})
+;(defcodec ok {:type :ok
+              ;:ninfo ninfo
+              ;:rninfos ninfos})
+
+;(defcodec ping {:type :ping})
+
+;(defcodec error {:type :error})
+
+(defcodec
+  ctype
+  (enum
+    :byte
+    :handshake))
 
 (defcodec frame
           (header
             ctype
-            {:join join
-             :ok ok
-             :ping ping
-             :error error}
+            {:handshake handshake}
             :type))

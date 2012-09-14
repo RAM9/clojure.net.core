@@ -5,151 +5,104 @@
   (:use [lamina.core]
         [clojure.tools.logging :only (debug info warn)]))
 
+(def timeout 2000)
+
 (def monitor-pool (at/mk-pool))
 
-(defn node-info [host port]
-   {:host host
+(defn new-node [host port]
+  {:host host
    :port port})
 
-(defn server-node [ninfo]
-  {:ninfo ninfo
-   :conn nil
-   :rnodes {}
-   :oconns #{}})
+(defn new-kernel [node]
+  {:node node
+   :connections {}})
 
-(defn server-node! [ninfo]
-  (agent (server-node ninfo)))
+(defn new-kernel! [node]
+  (agent (new-kernel node)))
 
-(defn remote-node [ninfo conn]
-  {:ninfo ninfo
-   :conn conn})
+(defn new-connection [node]
+  {:node node
+   :status {}})
 
-(defn remote-node! [ninfo conn]
-  (agent (remote-node ninfo conn)))
+(defn new-connection! [node]
+  (agent (new-connection node)))
 
-(defn nkey
-  ([ninfo] (nkey (:host ninfo) (:port ninfo)))
-  ([host port] [host port]))
-
-(defn rninfos [{:keys [rnodes]}]
-  (into [] (map (fn [[_ rnode!]] (:ninfo @rnode!)) rnodes)))
-
-(defn process [rnode! msg]
-  (debug "received" msg))
-
-(defn rnode-pipeline [rnode!]
+(def read-handshake
   (pipeline
-    read-channel
-    #(process rnode! %)
-    (fn [_] (restart))))
+    #(with-timeout timeout (read-channel %))
+    (fn [msg]
+      (if (= (:type msg) :handshake)
+        msg
+        (throw (Exception. "expected a handshake"))))))
 
-(defn add-node [{rnodes :rnodes sninfo :ninfo :as server} conn {:keys [ninfo] :as msg}]
-  (if (rnodes (nkey ninfo))
-    (do (info (nkey ninfo) "failed to join" (nkey sninfo))
-      [false server])
-    (let [rnode! (remote-node! ninfo conn)]
-      (info (nkey ninfo) "joined" (nkey sninfo))
-      ((rnode-pipeline rnode!) conn)
-      [true (assoc server :rnodes (assoc rnodes (nkey ninfo) rnode!))])))
+(defn handshake-complete [{connections :connections :as kernel} node]
+  (if (connections node)
+    [false kernel]
+    [true (assoc
+            kernel
+            :connections
+            (assoc
+              connections
+              node
+              (new-connection! node)))]))
 
-(defn handle-join2 [server conn msg]
-  (let [[joined? server2] (add-node server conn msg)]
+(defn send-handshake [conn node]
+  (enqueue conn {:type :handshake
+                 :node node}))
+
+(defn handshake-and-respond [kernel conn node]
+  (let [[joined? kernel2] (handshake-complete kernel node)]
     (if joined?
-      (enqueue conn {:type :ok
-                     :ninfo (:ninfo server)
-                     :rninfos (rninfos server)})
-      (enqueue-and-close conn {:type :error}))
-    server2))
+      (send-handshake conn (:node kernel))
+      (close conn))
+    kernel2))
 
-(defn handle-join [server! conn]
+(defn handshake-they-started [kernel! conn]
   (run-pipeline
     conn
-    read-channel
-    (fn [msg]
-      (if (= (:type msg) :join)
-        (send-off server! handle-join2 conn msg)
-        (throw (Exception. "first message was not join!"))))))
+    read-handshake
+    #(send-off kernel! handshake-and-respond conn (:node %))))
 
-(defn server-handler [server!]
+(defn handshake-we-complete [kernel conn node]
+  (let [[joined? kernel2] (handshake-complete kernel node)]
+    (if-not joined?
+      (close conn))))
+
+(defn handshake-we-started [kernel! conn]
+  (send-handshake conn (:node @kernel!))
+  (run-pipeline
+    conn
+    read-handshake
+    #(send-off kernel! handshake-we-complete conn (:node %))))
+
+(defn network-handler [kernel!]
   (fn [result-conn client-info]
     (run-pipeline
       result-conn
-      (fn [conn] (handle-join server! conn)))))
+      #(handshake-they-started kernel! %))))
 
-(defn monitor [server!]
-  (let [rnodes (:rnodes @server!)]
-    (doseq [[_ rnode!] rnodes]
-      (enqueue (:conn @rnode!) {:type :ping}))))
-
-(defn start-monitor [server!]
-  (send-off
-    server!
-    (fn [server]
-      (let [monitor-task (at/every 2000 #(monitor server!) monitor-pool)]
-        (with-meta server {:monitor-task monitor-task})))))
-
-(defn start [ninfo]
-  (info "starting server" ninfo)
-  (let [server! (server-node! ninfo)
-        conn (tcp/start-tcp-server (server-handler server!) {:port (:port ninfo)
-                                                             :frame cmd/frame})]
-    (send-off server! assoc :conn conn)
-    (start-monitor server!)
-    server!))
-
-(declare sjoin)
-
-(defn sjoin-all [server! rninfos]
-  (doseq
-    [ninfo rninfos]
-    (sjoin server! (:host ninfo) (:port ninfo))))
-
-(defn sjoin3 [server server! conn msg]
-  (let [[joined? server2] (add-node server conn msg)]
-    (if joined?
-      (do
-        (sjoin-all server! (:rninfos msg)))
-      (do
-        (enqueue conn {:type :error})
-        (close conn)))
-    server2))
-
-(defn sjoin2 [server! conn]
-  (enqueue conn {:type :join
-                 :ninfo (:ninfo @server!)})
-  (run-pipeline
-    conn
-    read-channel
-    (fn [msg]
-      (if (= (:type msg) :ok)
-        (do
-          (send-off server! sjoin3 server! conn msg))
-        (do
-          (close conn))))))
-
-(defn sjoin [server! host port]
-  (let [result-conn (tcp/tcp-client
-               {:host host
-                :port port
+(defn init [node]
+  (let [kernel! (new-kernel! node)
+        conn (tcp/start-tcp-server
+               (network-handler kernel!)
+               {:port (:port node)
                 :frame cmd/frame})]
+    kernel!))
+
+(defn connect [kernel! host port]
+  (let [result-conn (tcp/tcp-client
+                      {:host host
+                       :port port
+                       :frame cmd/frame})]
     (run-pipeline
       result-conn
-      #(sjoin2 server! %))))
+      #(handshake-we-started kernel! %))))
 
 (defn run-test []
-  (def serv1 (start (node-info "localhost" 6661)))
-  (def serv2 (start (node-info "localhost" 6662)))
-  (def serv3 (start (node-info "localhost" 6663)))
-  ;(def serv4 (start (node-info "node4" "localhost" 6664)))
-  ;(def serv5 (start (node-info "node5" "localhost" 6665)))
+  (def serv1 (init (new-node "localhost" 6661)))
+  (def serv2 (init (new-node  "localhost" 6662)))
 
-  (sjoin serv2 "localhost" 6661)
-  (sjoin serv3 "localhost" 6661))
-
-;(cjoin! (:server! serv2) "localhost" 6661)
-;(cjoin! (:server! serv3) "localhost" 6661)
-;(cjoin! (:server! serv4) "localhost" 6661)
-;(cjoin! (:server! serv5) "localhost" 6661))
+  (connect serv1 "localhost" 6662))
 
 (defn -main
   "I don't do a whole lot."
