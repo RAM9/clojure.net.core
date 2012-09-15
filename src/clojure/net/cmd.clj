@@ -30,8 +30,8 @@
   {:type :handshake-complete})
 
 (defcodec
-  join
-  {:type :join
+  connect
+  {:type :connect
    :nodes nodes})
 
 (defcodec
@@ -40,12 +40,12 @@
     :byte
     :handshake
     :handshake-complete
-    :join))
+    :connect))
 
 (defcodec frame
           (header
             ctype
             {:handshake handshake
              :handshake-complete handshake-complete
-             :join join}
+             :connect connect}
             :type))
