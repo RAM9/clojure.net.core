@@ -51,13 +51,11 @@
 (defn process [connection! msg]
   (debug "recieved" msg))
 
-(defn main-loop [connection!]
+(defn main-loop [connection! conn]
   (debug "main-loop")
-  (let [conn (:conn @connection!)]
-    ((pipeline
-       read-channel
-       #(process connection! %)
-       (fn [_] restart)) conn)))
+  (receive-all
+    conn
+    #(process connection! %)))
 
 (defn handshake-complete [{connections :connections :as kernel} kernel! conn node status]
   (if (connections node)
@@ -84,7 +82,7 @@
 
 (defn pending-handshake-complete [connection connection!]
   (debug "pending complete")
-  (main-loop connection!)
+  (main-loop connection! (:conn connection))
   (assoc connection :status (new-status :active)))
 
 (defn handshake-and-respond [kernel kernel! conn node]
@@ -114,7 +112,7 @@
       (do
         (debug "send handshake-complete")
         (send-handshake-complete conn)
-        (main-loop ((:connections kernel) node)))
+        (main-loop ((:connections kernel) node) conn))
       (close conn))
     kernel2))
 
