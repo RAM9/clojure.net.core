@@ -75,8 +75,9 @@
   (enqueue conn {:type :handshake
                  :node node}))
 
-(defn send-handshake-complete [conn]
-  (enqueue conn {:type :handshake-complete}))
+(defn send-handshake-complete [connection]
+  (enqueue (:conn connection) {:type :handshake-complete})
+  connection)
 
 (defn send-full-connect [kernel conn]
   (enqueue conn {:type :connect
@@ -84,7 +85,8 @@
 
 (defn notify-active [kernel msg]
   (doseq [connection (active-connections kernel)]
-    (enqueue (:conn connection) msg)))
+    (enqueue (:conn connection) msg))
+  kernel)
 
 (defn notify-connect [kernel connection!]
   (send-full-connect kernel (:conn @connection!))
@@ -117,7 +119,6 @@
            (new-connection! nil node :pending-connection)))])))
 
 (defn handshake-complete [connection conn]
-  (send-handshake-complete conn)
   (->
     connection
     (assoc :conn conn)
@@ -147,8 +148,9 @@
 
 (defn handshake-we-complete [kernel conn node handshake-node]
   (if (= node handshake-node)
-    (do
-      (send-off ((:connections kernel) node) handshake-complete conn)
+    (let [connection! ((:connections kernel) node)]
+      (send-off connection! handshake-complete conn)
+      (send-off connection! send-handshake-complete)
       kernel)
     (do
       (info "handshake node does not match joined node")
