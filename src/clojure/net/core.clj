@@ -19,14 +19,17 @@
 (defn new-kernel! [node]
   (agent (new-kernel node)))
 
-(defn new-connection [kernel! conn node status]
-  {:kernel! kernel!
-   :conn conn
+(defn new-connection [conn node status]
+   {:conn conn
    :node node
    :status status})
 
-(defn new-connection! [kernel! conn node status]
-  (agent (new-connection kernel! conn node status)))
+(defn new-connection! [conn node status]
+  (agent (new-connection conn node status)))
+
+(defn new-kernel-connection [kernel! connection!]
+  {:kernel! kernel!
+   :connection! connection!})
 
 (defn new-status [type]
   {:type type})
@@ -56,27 +59,27 @@
         (throw (Exception. "expected a handshake-complete"))))))
 
 (declare connect)
-(defn handle-connect [connection! {:keys [nodes]}]
+(defn handle-connect [kernel-connection {:keys [nodes]}]
   (doseq [node nodes]
-    (connect (:kernel! @connection!) node)))
+    (connect (:kernel! kernel-connection) node)))
 
 (def handlers {:connect handle-connect})
 
-(defn process [connection! msg]
-  (debug (:node @(:kernel! @connection!)) "receive" msg)
-  ((handlers (:type msg)) connection! msg))
+(defn process [kernel-connection msg]
+  (debug (:node @(:kernel! kernel-connection)) "receive" msg)
+  ((handlers (:type msg)) kernel-connection msg))
 
-(defn main-loop [connection! conn]
+(defn main-loop [kernel-connection conn]
   (receive-all
     conn
-    #(process connection! %)))
+    #(process kernel-connection %)))
 
 (defn handshake-complete [{connections :connections :as kernel} kernel! conn node status]
   (if (connections node)
     (do
       (info (:node kernel) "failed to join" node)
       [false kernel])
-    (let [connection! (new-connection! kernel! conn node status)]
+    (let [connection! (new-connection! conn node status)]
       (info (:node kernel) "joined" node)
       [true
        (assoc
@@ -95,6 +98,8 @@
   (enqueue conn {:type :handshake-complete}))
 
 (defn send-full-connect [kernel conn]
+  (debug "active" (active-connections kernel))
+  (debug "kernel" kernel)
   (enqueue conn {:type :connect
                  :nodes (active-nodes-vector kernel)}))
 
@@ -102,15 +107,16 @@
   (doseq [connection (active-connections kernel)]
     (enqueue (:conn connection) msg)))
 
-(defn notify-connect [kernel connection]
+(defn notify-connect [kernel connection!]
+  (send-full-connect kernel (:conn @connection!))
   (notify-active kernel {:type :connect
-                         :nodes [(:node connection)]}))
+                         :nodes [(:node @connection!)]})
+  kernel)
 
-(defn pending-handshake-complete [connection connection! kernel]
+(defn pending-handshake-complete [connection connection! kernel!]
   (let [conn (:conn connection)]
-    (main-loop connection! conn)
-    (send-full-connect kernel conn)
-    (notify-connect kernel connection)
+    (main-loop (new-kernel-connection kernel! connection!) conn)
+    (send-off kernel! notify-connect connection!)
     (assoc connection :status (new-status :active))))
 
 (defn handshake-and-respond [kernel kernel! conn node]
@@ -123,7 +129,7 @@
           read-handshake-complete
           (fn [_]
             (let [connection! ((:connections kernel2) node)]
-              (send-off connection! pending-handshake-complete connection! kernel2)))))
+              (send-off connection! pending-handshake-complete connection! kernel!)))))
       (close conn))
     kernel2))
 
@@ -138,7 +144,7 @@
     (if joined?
       (do
         (send-handshake-complete conn)
-        (main-loop ((:connections kernel2) node) conn))
+        (main-loop (new-kernel-connection kernel! ((:connections kernel2) node)) conn))
       (close conn))
     kernel2))
 
@@ -181,8 +187,10 @@
 (defn run-test []
   (def serv1 (init (new-node "localhost" 6661)))
   (def serv2 (init (new-node "localhost" 6662)))
+  (def serv3 (init (new-node "localhost" 6663)))
 
-  (connect serv1 "localhost" 6662))
+  (connect serv2 "localhost" 6661)
+  (connect serv3 "localhost" 6661))
 
 (defn -main
   "I don't do a whole lot."
