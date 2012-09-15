@@ -52,7 +52,6 @@
   (debug "recieved" msg))
 
 (defn main-loop [connection! conn]
-  (debug "main-loop")
   (receive-all
     conn
     #(process connection! %)))
@@ -81,7 +80,6 @@
   (enqueue conn {:type :handshake-complete}))
 
 (defn pending-handshake-complete [connection connection!]
-  (debug "pending complete")
   (main-loop connection! (:conn connection))
   (assoc connection :status (new-status :active)))
 
@@ -94,7 +92,6 @@
           conn
           read-handshake-complete
           (fn [_]
-            (debug "recv handshake-complete")
             (let [connection! ((:connections kernel2) node)]
               (send-off connection! pending-handshake-complete connection!)))))
       (close conn))
@@ -110,7 +107,6 @@
   (let [[joined? kernel2] (handshake-complete kernel kernel! conn node (new-status :active))]
     (if joined?
       (do
-        (debug "send handshake-complete")
         (send-handshake-complete conn)
         (main-loop ((:connections kernel) node) conn))
       (close conn))
