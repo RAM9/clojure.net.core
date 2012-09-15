@@ -32,6 +32,10 @@
 (defn new-status [type]
   {:type type})
 
+
+(defn nodes [{connections :connections}]
+  (into [] (map (fn [[_ connection!]] (:node @connection!)) connections)))
+
 (def read-handshake
   (pipeline
     #(with-timeout timeout (read-channel %))
@@ -79,8 +83,11 @@
 (defn send-handshake-complete [conn]
   (enqueue conn {:type :handshake-complete}))
 
-(defn pending-handshake-complete [connection connection!]
-  (main-loop connection! (:conn connection))
+(defn send-full-join [kernel conn]
+  (enqueue conn {:type :join
+                 :nodes (nodes kernel)}))
+
+(defn pending-handshake-complete [connection connection! kernel]
   (assoc connection :status (new-status :active)))
 
 (defn handshake-and-respond [kernel kernel! conn node]
@@ -93,7 +100,12 @@
           read-handshake-complete
           (fn [_]
             (let [connection! ((:connections kernel2) node)]
-              (send-off connection! pending-handshake-complete connection!)))))
+              (send-off connection! pending-handshake-complete connection! kernel2)
+              (if (await-for timeout connection!)
+                (do
+                  (main-loop connection! conn)
+                  (send-full-join kernel2 conn))
+                (throw (Exception. "timeout")))))))
       (close conn))
     kernel2))
 

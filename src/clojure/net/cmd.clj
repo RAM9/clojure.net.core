@@ -15,6 +15,12 @@
    :port port})
 
 (defcodec
+  nodes
+  (finite-frame
+    :int16
+    (repeated node)))
+
+(defcodec
   handshake
   {:type :handshake
    :node node})
@@ -24,15 +30,22 @@
   {:type :handshake-complete})
 
 (defcodec
+  join
+  {:type :join
+   :nodes nodes})
+
+(defcodec
   ctype
   (enum
     :byte
     :handshake
-    :handshake-complete))
+    :handshake-complete
+    :join))
 
 (defcodec frame
           (header
             ctype
             {:handshake handshake
-             :handshake-complete handshake-complete}
+             :handshake-complete handshake-complete
+             :join join}
             :type))
