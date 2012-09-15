@@ -6,7 +6,6 @@
         [clojure.tools.logging :only (debug info warn)]))
 
 (def timeout 2000)
-
 (def monitor-pool (at/mk-pool))
 
 (defn new-node [host port]
@@ -32,8 +31,13 @@
 (defn new-status [type]
   {:type type})
 
-(defn nodes [{connections :connections}]
-  (into [] (map (fn [[_ connection!]] (:node @connection!)) connections)))
+(defn active-connections [{connections :connections}]
+  (filter
+    #(= (:type (:status %)) :active)
+    (map (fn [[_ connection!]] @connection!) connections)))
+
+(defn active-nodes-vector [kernel]
+  (into [] (map :node (active-connections kernel))))
 
 (def read-handshake
   (pipeline
@@ -59,6 +63,7 @@
 (def handlers {:connect handle-connect})
 
 (defn process [connection! msg]
+  (debug (:node @(:kernel! @connection!)) "receive" msg)
   ((handlers (:type msg)) connection! msg))
 
 (defn main-loop [connection! conn]
@@ -91,12 +96,21 @@
 
 (defn send-full-connect [kernel conn]
   (enqueue conn {:type :connect
-                 :nodes (nodes kernel)}))
+                 :nodes (active-nodes-vector kernel)}))
+
+(defn notify-active [kernel msg]
+  (doseq [connection (active-connections kernel)]
+    (enqueue (:conn connection) msg)))
+
+(defn notify-connect [kernel connection]
+  (notify-active kernel {:type :connect
+                         :nodes [(:node connection)]}))
 
 (defn pending-handshake-complete [connection connection! kernel]
   (let [conn (:conn connection)]
     (main-loop connection! conn)
     (send-full-connect kernel conn)
+    (notify-connect kernel connection)
     (assoc connection :status (new-status :active))))
 
 (defn handshake-and-respond [kernel kernel! conn node]
