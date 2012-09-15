@@ -20,12 +20,17 @@
 (defn new-kernel! [node]
   (agent (new-kernel node)))
 
-(defn new-connection [node]
-  {:node node
-   :status {}})
+(defn new-connection [kernel! conn node status]
+  {:kernel! kernel!
+   :conn conn
+   :node node
+   :status status})
 
-(defn new-connection! [node]
-  (agent (new-connection node)))
+(defn new-connection! [kernel! conn node status]
+  (agent (new-connection kernel! conn node status)))
+
+(defn new-status [type]
+  {:type type})
 
 (def read-handshake
   (pipeline
@@ -35,12 +40,31 @@
         msg
         (throw (Exception. "expected a handshake"))))))
 
-(defn handshake-complete [{connections :connections :as kernel} node]
+(def read-handshake-complete
+  (pipeline
+    #(with-timeout timeout (read-channel %))
+    (fn [msg]
+      (if (= (:type msg) :handshake-complete)
+        msg
+        (throw (Exception. "expected a handshake-complete"))))))
+
+(defn process [connection! msg]
+  (debug "recieved" msg))
+
+(defn main-loop [connection!]
+  (debug "main-loop")
+  (let [conn (:conn @connection!)]
+    ((pipeline
+       read-channel
+       #(process connection! %)
+       (fn [_] restart)) conn)))
+
+(defn handshake-complete [{connections :connections :as kernel} kernel! conn node status]
   (if (connections node)
     (do
       (info (:node kernel) "failed to join" node)
       [false kernel])
-    (do
+    (let [connection! (new-connection! kernel! conn node status)]
       (info (:node kernel) "joined" node)
       [true
        (assoc
@@ -49,16 +73,32 @@
          (assoc
            connections
            node
-           (new-connection! node)))])))
+           connection!))])))
 
 (defn send-handshake [conn node]
   (enqueue conn {:type :handshake
                  :node node}))
 
-(defn handshake-and-respond [kernel conn node]
-  (let [[joined? kernel2] (handshake-complete kernel node)]
+(defn send-handshake-complete [conn]
+  (enqueue conn {:type :handshake-complete}))
+
+(defn pending-handshake-complete [connection connection!]
+  (debug "pending complete")
+  (main-loop connection!)
+  (assoc connection :status (new-status :active)))
+
+(defn handshake-and-respond [kernel kernel! conn node]
+  (let [[joined? kernel2] (handshake-complete kernel kernel! conn node (new-status :pending))]
     (if joined?
-      (send-handshake conn (:node kernel))
+      (do
+        (send-handshake conn (:node kernel))
+        (run-pipeline
+          conn
+          read-handshake-complete
+          (fn [_]
+            (debug "recv handshake-complete")
+            (let [connection! ((:connections kernel2) node)]
+              (send-off connection! pending-handshake-complete connection!)))))
       (close conn))
     kernel2))
 
@@ -66,19 +106,24 @@
   (run-pipeline
     conn
     read-handshake
-    #(send-off kernel! handshake-and-respond conn (:node %))))
+    #(send-off kernel! handshake-and-respond kernel! conn (:node %))))
 
-(defn handshake-we-complete [kernel conn node]
-  (let [[joined? kernel2] (handshake-complete kernel node)]
-    (if-not joined?
-      (close conn))))
+(defn handshake-we-complete [kernel kernel! conn node]
+  (let [[joined? kernel2] (handshake-complete kernel kernel! conn node (new-status :active))]
+    (if joined?
+      (do
+        (debug "send handshake-complete")
+        (send-handshake-complete conn)
+        (main-loop ((:connections kernel) node)))
+      (close conn))
+    kernel2))
 
 (defn handshake-we-started [kernel! conn]
   (send-handshake conn (:node @kernel!))
   (run-pipeline
     conn
     read-handshake
-    #(send-off kernel! handshake-we-complete conn (:node %))))
+    #(send-off kernel! handshake-we-complete kernel! conn (:node %))))
 
 (defn network-handler [kernel!]
   (fn [result-conn client-info]
@@ -105,7 +150,7 @@
 
 (defn run-test []
   (def serv1 (init (new-node "localhost" 6661)))
-  (def serv2 (init (new-node  "localhost" 6662)))
+  (def serv2 (init (new-node "localhost" 6662)))
 
   (connect serv1 "localhost" 6662))
 

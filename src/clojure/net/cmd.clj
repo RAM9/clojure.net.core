@@ -20,13 +20,19 @@
    :node node})
 
 (defcodec
+  handshake-complete
+  {:type :handshake-complete})
+
+(defcodec
   ctype
   (enum
     :byte
-    :handshake))
+    :handshake
+    :handshake-complete))
 
 (defcodec frame
           (header
             ctype
-            {:handshake handshake}
+            {:handshake handshake
+             :handshake-complete handshake-complete}
             :type))
