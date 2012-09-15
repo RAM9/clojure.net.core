@@ -56,6 +56,7 @@
   (debug "recieved" msg))
 
 (defn main-loop [connection! conn]
+  (debug "main-loop")
   (receive-all
     conn
     #(process connection! %)))
@@ -88,7 +89,10 @@
                  :nodes (nodes kernel)}))
 
 (defn pending-handshake-complete [connection connection! kernel]
-  (assoc connection :status (new-status :active)))
+  (let [conn (:conn connection)]
+    (main-loop connection! conn)
+    (send-full-join kernel conn)
+    (assoc connection :status (new-status :active))))
 
 (defn handshake-and-respond [kernel kernel! conn node]
   (let [[joined? kernel2] (handshake-complete kernel kernel! conn node (new-status :pending))]
@@ -100,12 +104,7 @@
           read-handshake-complete
           (fn [_]
             (let [connection! ((:connections kernel2) node)]
-              (send-off connection! pending-handshake-complete connection! kernel2)
-              (if (await-for timeout connection!)
-                (do
-                  (main-loop connection! conn)
-                  (send-full-join kernel2 conn))
-                (throw (Exception. "timeout")))))))
+              (send-off connection! pending-handshake-complete connection! kernel2)))))
       (close conn))
     kernel2))
 
@@ -120,7 +119,7 @@
     (if joined?
       (do
         (send-handshake-complete conn)
-        (main-loop ((:connections kernel) node) conn))
+        (main-loop ((:connections kernel2) node) conn))
       (close conn))
     kernel2))
 
@@ -145,14 +144,18 @@
                 :frame cmd/frame})]
     kernel!))
 
+(defn connected? [kernel node]
+  ((:connections kernel) node))
+
 (defn connect [kernel! host port]
-  (let [result-conn (tcp/tcp-client
-                      {:host host
-                       :port port
-                       :frame cmd/frame})]
-    (run-pipeline
-      result-conn
-      #(handshake-we-started kernel! %))))
+  (if-not (connected? @kernel! (new-node host port))
+    (let [result-conn (tcp/tcp-client
+                        {:host host
+                         :port port
+                         :frame cmd/frame})]
+      (run-pipeline
+        result-conn
+        #(handshake-we-started kernel! %)))))
 
 (defn run-test []
   (def serv1 (init (new-node "localhost" 6661)))
