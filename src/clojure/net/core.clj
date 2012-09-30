@@ -62,24 +62,48 @@
         msg
         (throw (Exception. "expected a ninfo"))))))
 
-(defn send-status [{:keys [conn] :as connection} status]
+(def recv-status
+  (pipeline
+    #(with-timeout timeout (read-channel %))
+    (fn [msg]
+      (if (= (:type msg) :status)
+        msg
+        (throw (Exception. "expected a status"))))))
+
+(defn send-conn-status [conn status]
   (enqueue conn {:type :status
-                 :status status})
+                 :status status}))
+
+(defn send-status [{:keys [conn] :as connection} status]
+  (debug "SEND-STATUS" status)
+  (send-conn-status conn status)
   connection)
 
-(defn bshake-already-connected [connection]
+(defn bshake-already-connected [{:keys [connection!] :as connection} conn]
   (if (pending? connection)
     (if (simultaneous? connection)
-      (debug "SIMULTANEOUS")
-      (debug "NOK"))
-    (debug "ACTIVE")))
+      (do
+        (close (:conn connection))
+        (send-off connection! send-status :ok-simultaneous)
+        (debug "SIMULTANEOUS")
+        (assoc connection :conn conn))
+      (do
+        (send-conn-status conn :nok)
+        (close conn)
+        (debug "NOK")
+        connection))
+    (do
+      (send-conn-status conn :alive)
+      (close conn)
+      (debug "ALIVE")
+      connection)))
 
 (defn bshake-recv-ninfo [{:keys [kernel!] :as kernel} conn {ninfo :ninfo}]
   (debug "ninfo is" ninfo)
   (if (connected? kernel ninfo)
     (let [connection! ((:connections kernel) ninfo)]
       (debug "already connected to" ninfo)
-      (send-off connection! bshake-already-connected)
+      (send-off connection! bshake-already-connected conn)
       kernel)
     (let [connection! (new-connection! kernel! ninfo conn)]
       (send-off connection! send-status :ok)
@@ -101,16 +125,21 @@
       result-conn
       #(bshake kernel! %))))
 
-(defn ashake-recv-status [{:keys [conn] :as connection} msg]
-  (debug "status is" msg))
+(defn ashake-recv-status [{:keys [conn] :as connection} {status :status}]
+  (debug "status is" status)
+  (cond
+    (or (= :ok status) (= :ok-simultaneous status)) (debug "ok to continue")
+    (= :nok status) (debug "nok to continue")
+    (= :alive status) (debug "connection already alive"))
+  connection)
 
-(defn ashake-send-ninfo [{:keys [kernel!] :as connection} conn]
+(defn ashake-send-ninfo [{:keys [kernel! connection!] :as connection} conn]
   (enqueue conn {:type :ninfo
                  :ninfo (:ninfo @kernel!)})
-  ;(run-pipeline
-    ;conn
-    ;recv-status
-    ;#(send-off connection! bshake-recv-status %))
+  (run-pipeline
+    conn
+    recv-status
+    #(send-off connection! ashake-recv-status %))
   (assoc
     connection
     :conn
