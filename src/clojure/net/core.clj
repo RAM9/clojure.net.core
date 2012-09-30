@@ -125,6 +125,15 @@
       result-conn
       #(bshake kernel! %))))
 
+(defn start-kernel [kernel!]
+  (let [ninfo (:ninfo @kernel!)
+        conn (tcp/start-tcp-server
+               (accept kernel!)
+               {:port (:port ninfo)
+                :frame cmd/frame})]
+    (info "started" ninfo)
+    (send-off kernel! #(assoc % :conn conn))))
+
 (defn ashake-recv-status [{:keys [conn] :as connection} {status :status}]
   (debug "status is" status)
   (cond
@@ -177,15 +186,6 @@
           (ashake connection!)
           (debug "connect associate" (:ninfo kernel) "with" ninfo)
           (assoc-connection kernel ninfo connection!))))))
-
-(defn start-kernel [kernel!]
-  (let [ninfo (:ninfo @kernel!)
-        conn (tcp/start-tcp-server
-               (accept kernel!)
-               {:port (:port ninfo)
-                :frame cmd/frame})]
-    (info "started" ninfo)
-    (send-off kernel! #(assoc % :conn conn))))
 
 (defn run-test []
   (def kernel1! (new-kernel! (new-ninfo "localhost" 6661)))
