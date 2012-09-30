@@ -7,6 +7,9 @@
 
 (def timeout 2000)
 
+(defn dbg-connection [{:keys [kernel!] :as connection}]
+  (debug (:ninfo @kernel!) "->" (:ninfo connection) ":" (closed? (:conn connection))))
+
 (defn new-ninfo [host port]
   {:host host
    :port port})
@@ -142,14 +145,12 @@
                                                       (assoc connection :status :alive))
     (= :nok status) (do
                       (debug "nok to continue")
-                      (close conn)
                       connection)
     (= :alive status) (do
                         ;TODO should be confirming the new conn or not
                         ;if confirmed, replace the existing connection
                         ;with this one, otherwise close this one
                         (debug "connection already alive")
-                        (close conn)
                         connection)))
 
 (defn ashake-send-ninfo [{:keys [kernel! connection!] :as connection} conn]
