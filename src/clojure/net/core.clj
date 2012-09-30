@@ -57,6 +57,16 @@
         cninfo (:ninfo connection)]
     (< 0 (.compareTo (v-ninfo kninfo) (v-ninfo cninfo)))))
 
+(defn main-loop [connection]
+  (receive-all
+    (:conn connection)
+    #(debug "RECEIVED" %)))
+
+(defn alive [{:keys [kernel!] :as connection}]
+  (info (:ninfo @kernel!) "->" (:ninfo connection) "is live")
+  (main-loop connection)
+  (assoc connection :status :alive))
+
 (def recv-ninfo
   (pipeline
     #(with-timeout timeout (read-channel %))
@@ -87,7 +97,7 @@
       (do
         (close (:conn connection))
         (send-off connection! send-status :ok-simultaneous)
-        (send-off connection! #(assoc % :status :alive))
+        (send-off connection! alive)
         (debug "SIMULTANEOUS")
         (assoc connection :conn conn))
       (do
@@ -142,7 +152,7 @@
   (cond
     (or (= :ok status) (= :ok-simultaneous status)) (do
                                                       (debug "ok to continue")
-                                                      (assoc connection :status :alive))
+                                                      (alive connection))
     (= :nok status) (do
                       (debug "nok to continue")
                       connection)
