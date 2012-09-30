@@ -75,7 +75,6 @@
                  :status status}))
 
 (defn send-status [{:keys [conn] :as connection} status]
-  (debug "SEND-STATUS" status)
   (send-conn-status conn status)
   connection)
 
@@ -85,6 +84,7 @@
       (do
         (close (:conn connection))
         (send-off connection! send-status :ok-simultaneous)
+        (send-off connection! #(assoc % :status :alive))
         (debug "SIMULTANEOUS")
         (assoc connection :conn conn))
       (do
@@ -128,10 +128,20 @@
 (defn ashake-recv-status [{:keys [conn] :as connection} {status :status}]
   (debug "status is" status)
   (cond
-    (or (= :ok status) (= :ok-simultaneous status)) (debug "ok to continue")
-    (= :nok status) (debug "nok to continue")
-    (= :alive status) (debug "connection already alive"))
-  connection)
+    (or (= :ok status) (= :ok-simultaneous status)) (do
+                                                      (debug "ok to continue")
+                                                      (assoc connection :status :alive))
+    (= :nok status) (do
+                      (debug "nok to continue")
+                      (close conn)
+                      connection)
+    (= :alive status) (do
+                        ;TODO should be confirming the new conn or not
+                        ;if confirmed, replace the existing connection
+                        ;with this one, otherwise close this one
+                        (debug "connection already alive")
+                        (close conn)
+                        connection)))
 
 (defn ashake-send-ninfo [{:keys [kernel! connection!] :as connection} conn]
   (enqueue conn {:type :ninfo
