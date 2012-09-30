@@ -10,42 +10,32 @@
 (defcodec port :int32)
 
 (defcodec
-  node
-   {:host host
-   :port port})
+  ninfo
+  {:type :ninfo
+   :ninfo {:host host
+           :port port}})
 
 (defcodec
-  nodes
-  (finite-frame
-    :int16
-    (repeated node)))
-
-(defcodec
-  handshake
-  {:type :handshake
-   :node node})
-
-(defcodec
-  handshake-complete
-  {:type :handshake-complete})
-
-(defcodec
-  connect
-  {:type :connect
-   :nodes nodes})
+  status
+  {:type :status
+   :status (enum
+             :byte
+             :ok
+             :ok-simultaneous
+             :nok
+             :not-allowed
+             :alive)})
 
 (defcodec
   ctype
   (enum
     :byte
-    :handshake
-    :handshake-complete
-    :connect))
+    :ninfo
+    :status))
 
 (defcodec frame
           (header
             ctype
-            {:handshake handshake
-             :handshake-complete handshake-complete
-             :connect connect}
+            {:ninfo ninfo
+             :status status}
             :type))
