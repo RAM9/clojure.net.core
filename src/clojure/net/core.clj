@@ -7,6 +7,15 @@
 
 (def timeout 2000)
 
+(defn serialize [form]
+  (let [writer (java.io.StringWriter.)]
+    (print-dup form writer)
+    (.toString writer)))
+
+(defn deserialize [string]
+  (let [reader (java.io.PushbackReader. (java.io.StringReader. string))]
+    (read reader)))
+
 (defn dbg-connection [{:keys [kernel!] :as connection}]
   (debug (:ninfo @kernel!) "->" (:ninfo connection) ":" (closed? (:conn connection))))
 
