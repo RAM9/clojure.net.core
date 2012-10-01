@@ -66,10 +66,26 @@
         cninfo (:ninfo connection)]
     (< 0 (.compareTo (v-ninfo kninfo) (v-ninfo cninfo)))))
 
-(defn main-loop [connection]
+(def message-handlers! (agent {}))
+(defn register-handler [mtype handler]
+  (send-off
+    message-handlers!
+    (fn [message-handlers]
+      (let [handlers (message-handlers mtype)]
+        (if handlers
+          (assoc message-handlers mtype (conj handlers handlers))
+          (assoc message-handlers mtype #{handler}))))))
+
+(defn main-loop [{:keys [connection!] :as connection}]
   (receive-all
     (:conn connection)
-    #(debug "RECEIVED" %)))
+    (fn [{mtype :type :as msg}]
+      (debug "received" msg)
+      (let [message-handlers @message-handlers!
+            handlers (message-handlers mtype)]
+        (if handlers
+          (doseq [handler handlers]
+            (handler connection!)))))))
 
 (defn alive [{:keys [kernel!] :as connection}]
   (info (:ninfo @kernel!) "->" (:ninfo connection) "is live")
