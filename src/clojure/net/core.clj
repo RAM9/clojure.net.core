@@ -58,6 +58,9 @@
 (defn pending? [connection]
   (= (:status connection) :pending))
 
+(defn alive? [connection]
+  (= (:status connection) :alive))
+
 (defn v-ninfo [ninfo]
   [(:host ninfo) (:port ninfo)])
 
@@ -76,19 +79,22 @@
           (assoc message-handlers mtype (conj handlers handlers))
           (assoc message-handlers mtype #{handler}))))))
 
+(defn process [connection! {mtype :type :as msg}]
+  (debug "received" msg)
+  (let [message-handlers @message-handlers!
+        handlers (message-handlers mtype)]
+    (if handlers
+      (doseq [handler handlers]
+        (handler connection! msg)))))
+
 (defn main-loop [{:keys [connection!] :as connection}]
   (receive-all
     (:conn connection)
-    (fn [{mtype :type :as msg}]
-      (debug "received" msg)
-      (let [message-handlers @message-handlers!
-            handlers (message-handlers mtype)]
-        (if handlers
-          (doseq [handler handlers]
-            (handler connection!)))))))
+    #(process connection! %)))
 
-(defn alive [{:keys [kernel!] :as connection}]
+(defn alive [{:keys [kernel! connection!] :as connection}]
   (info (:ninfo @kernel!) "->" (:ninfo connection) "is live")
+  (process connection! {:type :alive})
   (main-loop connection)
   (assoc connection :status :alive))
 
