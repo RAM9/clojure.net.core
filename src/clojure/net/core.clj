@@ -19,6 +19,10 @@
 (defn dbg-connection [{:keys [kernel!] :as connection}]
   (debug (:ninfo @kernel!) "->" (:ninfo connection) ":" (closed? (:conn connection))))
 
+(defn new-node [kernel! ninfo]
+  {:kernel! kernel!
+   :ninfo ninfo})
+
 (defn new-ninfo [host port]
   {:host host
    :port port})
@@ -51,6 +55,12 @@
     kernel
     :connections
     (assoc connections ninfo connection!)))
+
+(defn dissoc-connection [{:keys [connections] :as kernel} ninfo]
+  (assoc
+    kernel
+    :connections
+    (dissoc connections ninfo)))
 
 (defn connected? [kernel ninfo]
   ((:connections kernel) ninfo))
@@ -87,10 +97,21 @@
       (doseq [handler handlers]
         (handler connection! msg)))))
 
-(defn main-loop [{:keys [connection!] :as connection}]
+(defn handle-disconnect [connection!]
+  (send-off
+    connection!
+    #(assoc % :status :disconnected)))
+
+(defn main-loop [{:keys [connection! conn] :as connection}]
   (receive-all
-    (:conn connection)
-    #(process connection! %)))
+    conn
+    #(process connection! %))
+  (on-closed
+    conn
+    (fn []
+      (debug "disconnected")
+      (handle-disconnect connection!)
+      (process connection! {:type :disconnect}))))
 
 (defn alive [{:keys [kernel! connection!] :as connection}]
   (info (:ninfo @kernel!) "->" (:ninfo connection) "is live")
@@ -217,17 +238,29 @@
       #(send-off connection! ashake-send-ninfo %))))
 
 (defn connect [kernel! ninfo]
-  (send-off
-    kernel!
-    (fn [kernel]
-      (if (connected? kernel ninfo)
-        (do
-          (debug (:ninfo kernel) "already connected to" ninfo)
-          kernel)
-        (let [connection! (new-connection! kernel! ninfo)]
-          (ashake connection!)
-          (debug "connect associate" (:ninfo kernel) "with" ninfo)
-          (assoc-connection kernel ninfo connection!))))))
+  (let [result (promise)]
+    (send-off
+      kernel!
+      (fn [kernel]
+        (if (connected? kernel ninfo)
+          (do
+            (debug (:ninfo kernel) "already connected to" ninfo)
+            (deliver result ((:connections kernel) ninfo))
+            kernel)
+          (let [connection! (new-connection! kernel! ninfo)]
+            (deliver result connection!)
+            (ashake connection!)
+            (debug "connect associate" (:ninfo kernel) "with" ninfo)
+            (assoc-connection kernel ninfo connection!)))))
+    result))
+
+(defn node-to-connection! [{:keys [kernel! ninfo]}]
+  ((:connections @kernel!) ninfo))
+
+(defn disconnect [node]
+  (let [connection! (node-to-connection! node)]
+    (if connection!
+      (close (:conn @connection!)))))
 
 (defn run-test []
   (def kernel1! (new-kernel! (new-ninfo "localhost" 6661)))
@@ -238,8 +271,13 @@
   (start-kernel kernel2!)
   (await-for timeout kernel1! kernel2!)
 
-  (connect kernel1! (new-ninfo "localhost" 6662))
-  (connect kernel2! (new-ninfo "localhost" 6661))
+  (let [node1-2 (new-node kernel1! (new-ninfo "localhost" 6662))
+        node2-1 (new-node kernel2! (new-ninfo "localhost" 6661))
+        conn1 @(connect kernel1! (new-ninfo "localhost" 6662))
+        conn2 @(connect kernel2! (new-ninfo "localhost" 6661))]
+    (. Thread (sleep 2000))
+    (disconnect node1-2)
+    )
   )
 
 (defn -main [& args]
