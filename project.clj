@@ -8,5 +8,5 @@
                            [overtone/at-at "1.0.0"]
                            [org.clojure/tools.logging "0.2.3"]
                            [log4j "1.2.16" :exclusions [javax.mail/mail javax.jms/jms com.sun.jdmk/jmxtools com.sun.jmx/jmxri]]]
-            :main clojure.net.core)
+            :main clojure.net.test)
 
