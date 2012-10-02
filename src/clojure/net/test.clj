@@ -1,5 +1,6 @@
 (ns clojure.net.test
-  (:use [clojure.net.kernel]))
+  (:use [clojure.net.kernel]
+        [clojure.net.napply]))
 
 (defn run-test []
   (def kernel1! (new-kernel! (new-ninfo "localhost" 6661)))

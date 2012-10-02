@@ -1,5 +1,5 @@
 (ns clojure.net.util
-  (:use [clojure.net.core]
+  (:use [clojure.net.kernel]
         [clojure.tools.logging :only (debug info warn)]))
 
 (defn ensure-util [obj]
@@ -39,7 +39,7 @@
         (assoc counters cname 0)))))
 
 (defn inc-counter [counterable cname]
-  (let [counterable (create-counter countable cname)
+  (let [counterable (create-counter counterable cname)
         counters (get-field counterable :counters)
         counter (counters cname)]
     (let [counterable (set-field
