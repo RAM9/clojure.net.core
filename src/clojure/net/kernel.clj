@@ -31,7 +31,8 @@
   {:kernel! nil
    :ninfo ninfo
    :conn nil
-   :connections {}})
+   :connections {}
+   :plugins {}})
 
 (defn new-kernel! [& args]
   (let [kernel! (agent (apply new-kernel args))]
@@ -44,7 +45,8 @@
     :kernel! kernel!
     :ninfo ninfo
     :status :pending
-    :conn conn}))
+    :conn conn
+    :plugins {}}))
 
 (defn new-connection! [& args]
   (let [connection! (agent (apply new-connection args))]

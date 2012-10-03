@@ -33,9 +33,10 @@
     :ninfo
     :status))
 
-(defcodec frame
-          (header
-            ctype
-            {:ninfo ninfo
-             :status status}
-            :type))
+(defcodec
+  frame
+  (header
+    ctype
+    {:ninfo ninfo
+     :status status}
+    :type))
