@@ -32,7 +32,7 @@
    :ninfo ninfo
    :conn nil
    :connections {}
-   :plugins {}})
+   :op-seq 0})
 
 (defn new-kernel! [& args]
   (let [kernel! (agent (apply new-kernel args))]
@@ -46,7 +46,7 @@
     :ninfo ninfo
     :status :pending
     :conn conn
-    :plugins {}}))
+    :op-seq 0}))
 
 (defn new-connection! [& args]
   (let [connection! (agent (apply new-connection args))]
@@ -136,6 +136,30 @@
       (if (= (:type msg) :status)
         msg
         (throw (Exception. "expected a status"))))))
+
+(defn inc-op-sec [connection]
+  (assoc
+    connection
+    :op-seq
+    (+ (:op-seq connection) 1)))
+
+(defn csend [connection! fun]
+  (let [result (result-channel)]
+    (send-off
+      connection!
+      (fn [connection]
+        (if (alive? connection)
+          (try
+            (let [[connection value] (fun connection)]
+              (enqueue result value)
+              (inc-op-seq connection))
+            catch Exception e
+            (error result e)
+            connection)
+          (do
+            (error result (Exception. "connection not alive"))
+            connection))))
+    result))
 
 (defn send-conn-status [conn status]
   (enqueue conn {:type :status
