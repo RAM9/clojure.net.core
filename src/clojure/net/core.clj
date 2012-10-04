@@ -1,1 +1,2 @@
-(ns clojure.net.core)
+(ns clojure.net.core
+  :use [clojure.net.kernel])

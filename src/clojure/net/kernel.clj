@@ -46,7 +46,8 @@
     :ninfo ninfo
     :status :pending
     :conn conn
-    :op-seq 0}))
+    :op-seq 0
+    :results {}}))
 
 (defn new-connection! [& args]
   (let [connection! (agent (apply new-connection args))]
@@ -63,6 +64,19 @@
     kernel
     :connections
     (dissoc connections ninfo)))
+
+(defn assoc-result [connection id result]
+  (assoc
+    connection
+    :results
+    (assoc (:results connection) id result)))
+
+(defn enqueue-result [{:keys [results] :as connection} id result]
+  (enqueue (results id) result)
+  (assoc
+    connection
+    :results
+    (dissoc results id)))
 
 (defn connected? [kernel ninfo]
   ((:connections kernel) ninfo))
@@ -137,7 +151,7 @@
         msg
         (throw (Exception. "expected a status"))))))
 
-(defn inc-op-sec [connection]
+(defn inc-op-seq [connection]
   (assoc
     connection
     :op-seq
@@ -153,13 +167,21 @@
             (let [[connection value] (fun connection)]
               (enqueue result value)
               (inc-op-seq connection))
-            catch Exception e
-            (error result e)
-            connection)
+            (catch Exception e
+              (error result e)
+              connection))
           (do
             (error result (Exception. "connection not alive"))
             connection))))
     result))
+
+(defn node-send [{:keys [kernel! ninfo] :as node} fun]
+  (let [connection! ((:connections @kernel!) ninfo)]
+    (if connection!
+      (csend connection! fun)
+      (let [result (result-channel)]
+        (error result-channel (Exception. "no connection"))
+        result-channel))))
 
 (defn send-conn-status [conn status]
   (enqueue conn {:type :status
